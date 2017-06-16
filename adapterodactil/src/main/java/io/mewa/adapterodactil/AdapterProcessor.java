@@ -197,7 +197,7 @@ public class AdapterProcessor extends AbstractProcessor {
 
         for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
             RowInfo info = parsingInfo.adapterInfo.get(i);
-            onBindViewHolder.addStatement("$L.$L.setText($L($L))", argViewHolder, info.fields.data, info.method, varData);
+            onBindViewHolder.addStatement("$L.$L.setText($L($L.$L, $L))", argViewHolder, info.fields.data, info.method, argViewHolder, info.fields.data, varData);
         }
 
         return onBindViewHolder;
