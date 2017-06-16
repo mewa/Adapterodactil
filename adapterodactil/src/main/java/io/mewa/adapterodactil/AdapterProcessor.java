@@ -11,6 +11,7 @@ import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,6 +45,9 @@ import io.mewa.adapterodactil.annotations.Adapt;
 import io.mewa.adapterodactil.annotations.Data;
 import io.mewa.adapterodactil.annotations.Label;
 import io.mewa.adapterodactil.annotations.Row;
+import io.mewa.adapterodactil.annotations.UsePlugin;
+import io.mewa.adapterodactil.plugins.Plugin;
+import io.mewa.adapterodactil.plugins.TextViewPlugin;
 
 @AutoService(Processor.class)
 public class AdapterProcessor extends AbstractProcessor {
@@ -60,6 +64,7 @@ public class AdapterProcessor extends AbstractProcessor {
     private Elements elementUtils;
     private Types typeUtils;
     private ParsingInfo parsingInfo;
+    private Map<String, String> plugins;
 
 
     @Override
@@ -73,6 +78,13 @@ public class AdapterProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        plugins = new HashMap<>();
+        for (Element e : roundEnv.getElementsAnnotatedWith(UsePlugin.class)) {
+            if (e.getKind() != ElementKind.CLASS) {
+                messager.printMessage(Diagnostic.Kind.ERROR, "@UsePlugin must be used on a type");
+            }
+            processPlugin(e);
+        }
         for (Element e : roundEnv.getElementsAnnotatedWith(Adapt.class)) {
             if (e.getKind() != ElementKind.CLASS) {
                 messager.printMessage(Diagnostic.Kind.ERROR, "@Adapt must be used on a type");
@@ -82,15 +94,20 @@ public class AdapterProcessor extends AbstractProcessor {
         return true;
     }
 
+    private void processPlugin(Element e) {
+        UsePlugin plugin = e.getAnnotation(UsePlugin.class);
+        messager.printMessage(Diagnostic.Kind.MANDATORY_WARNING, "plugin: " + plugin);
+    }
+
     private void processAdapt(Element elem) {
         parsingInfo = new ParsingInfo(elem);
         parsingInfo.adapt = elem.getAnnotation(Adapt.class);
 
         for (Element member : elem.getEnclosedElements()) {
             if (member.getAnnotation(Row.class) != null)
-                parseRow(member);
+                parseRow((ExecutableElement) member);
             if (member.getAnnotation(Data.class) != null)
-                parseData(member);
+                parseData((ExecutableElement) member);
         }
 
         TypeSpec adapter = createAdapter(elem);
@@ -202,7 +219,15 @@ public class AdapterProcessor extends AbstractProcessor {
 
         for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
             RowInfo info = parsingInfo.adapterInfo.get(i);
-            onBindViewHolder.addStatement("$L.$L.setText($L($L.$L, $L))", argViewHolder, info.fields.data, info.method, argViewHolder, info.fields.data, varData);
+            String varResult = "result" + i;
+            onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.pluginName);
+            onBindViewHolder.addStatement("$L($L.$L, $L)", info.method, argViewHolder, info.fields.data, varData);
+
+            CodeBlock statement = info.pluginInfo.plugin.process(i, info.fields.data, varResult);
+            onBindViewHolder.addCode(statement);
+
+            onBindViewHolder.addStatement("$L.$L.setText($L($L.$L, $L))",
+                    argViewHolder, info.fields.data, info.method, argViewHolder, info.fields.data, varData);
         }
 
         return onBindViewHolder;
@@ -301,21 +326,44 @@ public class AdapterProcessor extends AbstractProcessor {
         return holder.build();
     }
 
-    private void parseRow(Element elem) {
+    private void parseRow(ExecutableElement elem) {
         Row row = elem.getAnnotation(Row.class);
         Label label = elem.getAnnotation(Label.class);
         final String method = elem.getSimpleName().toString();
 
-        parsingInfo.adapterInfo.put(row.num(), new RowInfo(row, label, method));
+        String typeName = elem.getParameters().get(0).asType().toString();
+        PluginInfo pluginInfo = getPlugin(typeName);
+
+        parsingInfo.adapterInfo.put(row.num(), new RowInfo(row, label, method, pluginInfo));
     }
 
-    private void parseData(Element elem) {
-        parsingInfo.dataInfo = new DataInfo((ExecutableElement) elem, elem.getAnnotation(Data.class));
+    private PluginInfo getPlugin(String clazz) {
+        String plugin = plugins.get(clazz);
+
+        // no plugins availables - use built-in TextView plugin
+        if (plugin == null && clazz.equals(TextViewPlugin.CLASS_NAME)) {
+            plugin = TextViewPlugin.NAME;
+        }
+        messager.printMessage(Diagnostic.Kind.OTHER, "Using " + plugin + " for " + clazz);
+        try {
+            Plugin pluginObject = (Plugin) Class.forName(plugin).newInstance();
+            return new PluginInfo(plugin, pluginObject);
+        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
+            e.printStackTrace();
+            messager.printMessage(Diagnostic.Kind.ERROR, "Plugin error: " + e);
+        }
+        messager.printMessage(Diagnostic.Kind.ERROR, "Cannot find plugin for " + clazz);
+        return null;
+    }
+
+    private void parseData(ExecutableElement elem) {
+        parsingInfo.dataInfo = new DataInfo(elem, elem.getAnnotation(Data.class));
     }
 
     @Override
     public Set<String> getSupportedAnnotationTypes() {
         Set<String> annotations = new LinkedHashSet<>();
+        annotations.add(UsePlugin.class.getCanonicalName());
         annotations.add(Adapt.class.getCanonicalName());
         annotations.add(Row.class.getCanonicalName());
         annotations.add(Label.class.getCanonicalName());
@@ -353,16 +401,29 @@ public class AdapterProcessor extends AbstractProcessor {
         }
     }
 
+    private static class PluginInfo {
+        final String pluginName;
+        final Plugin plugin;
+
+        private PluginInfo(String pluginName, Plugin plugin) {
+            this.pluginName = pluginName;
+            this.plugin = plugin;
+        }
+    }
+
     private static class RowInfo {
         final String method;
         final Row row;
         final Label label;
+        final PluginInfo pluginInfo;
+
         Fields fields;
 
-        RowInfo(Row row, Label label, String method) {
+        RowInfo(Row row, Label label, String method, PluginInfo pluginInfo) {
             this.row = row;
             this.label = label;
             this.method = method;
+            this.pluginInfo = pluginInfo;
         }
 
         private static class Fields {
