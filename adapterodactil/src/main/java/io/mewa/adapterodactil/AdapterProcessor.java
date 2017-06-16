@@ -40,6 +40,11 @@ import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 
+import io.mewa.adapterodactil.annotations.Adapt;
+import io.mewa.adapterodactil.annotations.Data;
+import io.mewa.adapterodactil.annotations.Label;
+import io.mewa.adapterodactil.annotations.Row;
+
 @AutoService(Processor.class)
 public class AdapterProcessor extends AbstractProcessor {
     private final static ClassName VIEW = ClassName.get("android.view", "View");
