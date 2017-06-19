@@ -45,6 +45,7 @@ import io.mewa.adapterodactil.annotations.Data;
 import io.mewa.adapterodactil.annotations.Label;
 import io.mewa.adapterodactil.annotations.OverridePlugin;
 import io.mewa.adapterodactil.annotations.Row;
+import io.mewa.adapterodactil.plugins.IgnorePlugin;
 import io.mewa.adapterodactil.plugins.Plugin;
 import io.mewa.adapterodactil.plugins.TextViewPlugin;
 
@@ -210,7 +211,7 @@ public class AdapterProcessor extends AbstractProcessor {
             String iRowValue = "rowValue" + i;
             onBindViewHolder.addCode("\n");
             onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
-            onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.pluginName);
+            onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
 
             onBindViewHolder.addStatement("$T $L = $L($L.$L, $L)", info.method.resultType, iRowValue, info.method.methodName, argViewHolder, info.fields.data, varData);
 

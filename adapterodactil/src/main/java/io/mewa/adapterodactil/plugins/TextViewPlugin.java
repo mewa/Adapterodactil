@@ -6,6 +6,9 @@ import com.squareup.javapoet.CodeBlock;
  * Created by mewa on 6/16/17.
  */
 
+/**
+ * Plugin handling default TextView's setText logic based on returned String
+ */
 public class TextViewPlugin implements Plugin {
     public static final String TEXT_VIEW = "android.widget.TextView";
 

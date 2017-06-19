@@ -1,14 +1,16 @@
-package io.mewa.adapterodactil;
+package io.mewa.adapterodactil.plugins;
 
 import com.squareup.javapoet.CodeBlock;
-
-import io.mewa.adapterodactil.plugins.Plugin;
 
 /**
  * Created by mewa on 6/19/17.
  */
 
-class IgnorePlugin implements Plugin {
+/**
+ * Plugin overriding default TextViewPlugin's code generation, applied
+ * by using #{@link io.mewa.adapterodactil.annotations.OverridePlugin} annotation
+ */
+public class IgnorePlugin implements Plugin {
     @Override
     public String forElement() {
         throw new IllegalArgumentException("stub");
