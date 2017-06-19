@@ -42,6 +42,7 @@ import javax.tools.Diagnostic;
 
 import io.mewa.adapterodactil.annotations.Adapt;
 import io.mewa.adapterodactil.annotations.Data;
+import io.mewa.adapterodactil.annotations.Item;
 import io.mewa.adapterodactil.annotations.Label;
 import io.mewa.adapterodactil.annotations.OverridePlugin;
 import io.mewa.adapterodactil.annotations.Row;
@@ -97,6 +98,8 @@ public class AdapterProcessor extends AbstractProcessor {
                 parseRow((ExecutableElement) member);
             if (member.getAnnotation(Data.class) != null)
                 parseData((ExecutableElement) member);
+            if (member.getAnnotation(Item.class) != null)
+                parseItem((ExecutableElement) member);
         }
 
         TypeSpec adapter = createAdapter(elem);
@@ -221,6 +224,12 @@ public class AdapterProcessor extends AbstractProcessor {
             }
         }
 
+        // Item-wide properties handling
+        if (parsingInfo.itemInfo != null) {
+            onBindViewHolder.addCode("\n");
+            onBindViewHolder.addStatement("$L($L.$L, $L, $L)", parsingInfo.itemInfo.method, argViewHolder, parsingInfo.vhRoot, argPosition, varData);
+        }
+
         return onBindViewHolder;
     }
 
@@ -288,9 +297,16 @@ public class AdapterProcessor extends AbstractProcessor {
         TypeSpec.Builder holder = TypeSpec.classBuilder(vhName)
                 .superclass(VIEW_HOLDER);
 
+        final String argContainer = "container";
+        final String root = "root";
+        parsingInfo.vhRoot = root;
+
+        holder.addField(VIEW, root);
+
         MethodSpec.Builder ctor = MethodSpec.constructorBuilder()
-                .addParameter(VIEW_GROUP, "container")
-                .addStatement("super(container)");
+                .addParameter(VIEW_GROUP, argContainer)
+                .addStatement("super($L)", argContainer)
+                .addStatement("$L = $L", root, argContainer);
 
         for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
             RowInfo info = parsingInfo.adapterInfo.get(i);
@@ -381,6 +397,10 @@ public class AdapterProcessor extends AbstractProcessor {
         parsingInfo.dataInfo = new DataInfo(elem, elem.getAnnotation(Data.class));
     }
 
+    private void parseItem(ExecutableElement elem) {
+        parsingInfo.itemInfo = new ItemInfo(elem, elem.getSimpleName().toString(), elem.getParameters().get(0).asType());
+    }
+
     @Override
     public Set<String> getSupportedAnnotationTypes() {
         Set<String> annotations = new LinkedHashSet<>();
@@ -403,6 +423,8 @@ public class AdapterProcessor extends AbstractProcessor {
         private Adapt adapt;
         private DataInfo dataInfo;
         private ClassName vhClassName;
+        public ItemInfo itemInfo;
+        public String vhRoot;
 
         private ParsingInfo(Element elem) {
             pkg = elementUtils.getPackageOf(elem);
@@ -419,6 +441,18 @@ public class AdapterProcessor extends AbstractProcessor {
         private DataInfo(ExecutableElement elem, Data data) {
             this.element = elem;
             this.data = data;
+        }
+    }
+
+    private static class ItemInfo {
+        final TypeMirror paramType;
+        final ExecutableElement element;
+        final String method;
+
+        private ItemInfo(ExecutableElement elem, String method, TypeMirror paramType) {
+            this.element = elem;
+            this.method = method;
+            this.paramType = paramType;
         }
     }
 
