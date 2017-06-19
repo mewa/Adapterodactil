@@ -1,19 +1,22 @@
 package io.mewa.adapterodactil.plugins;
 
 import com.squareup.javapoet.CodeBlock;
-import com.squareup.javapoet.MethodSpec;
 
 /**
  * Created by mewa on 6/16/17.
  */
 
 public class TextViewPlugin implements Plugin {
-    public static final String NAME = TextViewPlugin.class.getCanonicalName();
-    public static final String CLASS_NAME = "android.widget.TextView";
+    public static final String TEXT_VIEW = "android.widget.TextView";
 
-    public CodeBlock process(Object view, Object result) {
+    @Override
+    public String forElement() {
+        return TEXT_VIEW;
+    }
+
+    public CodeBlock process(int num, String view, Object result) {
         return CodeBlock.builder()
-                .addStatement("int xaxa = 555")
+                .addStatement("$L.setText($L)", view, result)
                 .build();
     }
 

@@ -7,5 +7,7 @@ import com.squareup.javapoet.CodeBlock;
  */
 
 public interface Plugin {
-    CodeBlock process(Object view, Object result);
+    String forElement();
+
+    CodeBlock process(int num, String view, Object result);
 }
