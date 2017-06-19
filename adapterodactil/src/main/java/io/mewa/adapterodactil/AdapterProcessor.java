@@ -299,9 +299,11 @@ public class AdapterProcessor extends AbstractProcessor {
 
             info.fields = new RowInfo.Fields(iLabel, iData);
 
+            TypeName paramType = TypeName.get(info.method.paramType);
+
             ctor.addParameter(VIEW, iView);
             holder.addField(TEXT_VIEW, iLabel);
-            holder.addField(TEXT_VIEW, iData);
+            holder.addField(paramType, iData);
             ctor.addComment(String.format(Locale.US, "%s %d, label: \"%s\"", Row.class.getSimpleName(), info.row.num(), info.label.value()));
             ctor.addCode(
                     CodeBlock.builder()
@@ -311,7 +313,7 @@ public class AdapterProcessor extends AbstractProcessor {
                             .endControlFlow()
                             .build()
             );
-            ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, TEXT_VIEW, iView, info.row.dataId());
+            ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, info.row.dataId());
         }
         holder.addMethod(ctor.build());
         return holder.build();
@@ -331,7 +333,7 @@ public class AdapterProcessor extends AbstractProcessor {
         else
             pluginInfo = new PluginInfo(IgnorePlugin.class.getCanonicalName(), new IgnorePlugin());
 
-        MethodInfo methodInfo = new MethodInfo(elem.getReturnType(), method);
+        MethodInfo methodInfo = new MethodInfo(elem.getReturnType(), elem.getParameters().get(0).asType(), method);
 
         parsingInfo.adapterInfo.put(row.num(), new RowInfo(row, label, overridePlugin, methodInfo, pluginInfo));
     }
@@ -432,9 +434,11 @@ public class AdapterProcessor extends AbstractProcessor {
     private static class MethodInfo {
         final TypeMirror resultType;
         final String methodName;
+        final TypeMirror paramType;
 
-        private MethodInfo(TypeMirror resultType, String methodName) {
+        private MethodInfo(TypeMirror resultType, TypeMirror paramType, String methodName) {
             this.resultType = resultType;
+            this.paramType = paramType;
             this.methodName = methodName;
         }
     }
