@@ -322,15 +322,19 @@ public class AdapterProcessor extends AbstractProcessor {
             ctor.addParameter(VIEW, iView);
             holder.addField(TEXT_VIEW, iLabel);
             holder.addField(paramType, iData);
-            ctor.addComment(String.format(Locale.US, "%s %d, label: \"%s\"", Row.class.getSimpleName(), info.row.num(), info.label.value()));
-            ctor.addCode(
-                    CodeBlock.builder()
-                            .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
-                            .beginControlFlow("if ($L != null)", iLabel)
-                            .addStatement("$L.setText($S)", iLabel, info.label.value())
-                            .endControlFlow()
-                            .build()
-            );
+
+            String labelValue = info.label != null ? info.label.value() : "*none*";
+            ctor.addComment(String.format(Locale.US, "%s %d, label: \"%s\"", Row.class.getSimpleName(), info.row.num(), labelValue));
+            if (info.label != null) {
+                ctor.addCode(
+                        CodeBlock.builder()
+                                .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
+                                .beginControlFlow("if ($L != null)", iLabel)
+                                .addStatement("$L.setText($S)", iLabel, info.label.value())
+                                .endControlFlow()
+                                .build()
+                );
+            }
             ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, info.row.dataId());
         }
         holder.addMethod(ctor.build());
