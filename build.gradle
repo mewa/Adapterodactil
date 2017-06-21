@@ -1,23 +1,11 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
+apply plugin: 'java'
 
-buildscript {
-    repositories {
-        jcenter()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:2.3.3'
-
-        // NOTE: Do not place your application dependencies here; they belong
-        // in the individual module build.gradle files
-    }
+dependencies {
+    compile fileTree(include: ['*.jar'], dir: 'libs')
+    // https://mvnrepository.com/artifact/com.google.auto.service/auto-service
+    compile 'com.google.auto.service:auto-service:1.0-rc1'
+    compile 'com.squareup:javapoet:1.9.0'
 }
 
-allprojects {
-    repositories {
-        jcenter()
-    }
-}
-
-task clean(type: Delete) {
-    delete rootProject.buildDir
-}
+sourceCompatibility = "1.7"
+targetCompatibility = "1.7"
