@@ -110,7 +110,8 @@ public class AdapterProcessor extends AbstractProcessor {
     private TypeSpec createAdapter(Element elem) {
         final String viewHolderName = "ViewHolderImpl";
 
-        TypeSpec.Builder adapter = TypeSpec.classBuilder(parsingInfo.adapterName);
+        TypeSpec.Builder adapter = TypeSpec.classBuilder(parsingInfo.adapterName)
+                .addModifiers(Modifier.PUBLIC);
 
         TypeSpec viewHolder = createViewHolder(viewHolderName);
 
