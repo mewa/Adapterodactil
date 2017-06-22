@@ -60,6 +60,8 @@ public class AdapterProcessor extends AbstractProcessor {
     private final static ClassName VIEW_HOLDER = ClassName.get("android.support.v7.widget.RecyclerView", "ViewHolder");
     private final static ClassName LAYOUT_INFLATER = ClassName.get("android.view", "LayoutInflater");
 
+    private final static String METHOD_ONCREATE_VIEWHOLDER = "onCreateViewHolder";
+
     private Messager messager;
     private Filer filer;
     private Elements elementUtils;
@@ -92,6 +94,13 @@ public class AdapterProcessor extends AbstractProcessor {
     private void processAdapt(Element elem) {
         parsingInfo = new ParsingInfo(elem);
         parsingInfo.adapt = elem.getAnnotation(Adapt.class);
+        parsingInfo.element = (TypeElement) elem;
+
+        for (Element element : elem.getEnclosedElements()) {
+            if (element.getSimpleName().toString().equals(METHOD_ONCREATE_VIEWHOLDER)) {
+                parsingInfo.abstractCreateViewHolder = element.getModifiers().contains(Modifier.ABSTRACT);
+            }
+        }
 
         for (Element member : elem.getEnclosedElements()) {
             if (member.getAnnotation(Row.class) != null)
@@ -136,9 +145,16 @@ public class AdapterProcessor extends AbstractProcessor {
         MethodSpec.Builder onCreateViewHolder = onCreateViewHolderImpl(adapter, viewHolder);
         MethodSpec.Builder onBindViewHolder = onBindViewHolderImpl(adapter, viewHolder);
 
+        MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
+                .addParameter(TypeName.INT, "position")
+                .addModifiers(Modifier.PUBLIC)
+                .returns(TypeName.INT)
+                .addStatement("return $L", parsingInfo.adapterInfo.get(0).row.viewType());
+
         adapter
                 .addMethod(onCreateViewHolder.build())
-                .addMethod(onBindViewHolder.build());
+                .addMethod(onBindViewHolder.build())
+                .addMethod(getItemViewType.build());
     }
 
     private void implementDataLogic(TypeSpec.Builder adapter) {
@@ -242,12 +258,14 @@ public class AdapterProcessor extends AbstractProcessor {
         final String varContainer = "layout";
         final String varContainerViewGroup = "layoutVG";
 
-        MethodSpec.Builder onCreateViewHolder = MethodSpec.methodBuilder("onCreateViewHolder")
+        MethodSpec.Builder onCreateViewHolder = MethodSpec.methodBuilder(METHOD_ONCREATE_VIEWHOLDER)
                 .addModifiers(Modifier.PUBLIC)
                 .returns(parsingInfo.vhClassName)
                 .addAnnotation(Override.class)
                 .addParameter(VIEW_GROUP, argContainer)
                 .addParameter(TypeName.INT, argViewType);
+
+        onCreateViewHolder.beginControlFlow("if ($L == $L)", argViewType, parsingInfo.adapterInfo.get(0).row.viewType());
 
         onCreateViewHolder.addStatement("$T $L = $L.from($L.getContext())", LAYOUT_INFLATER, varInflater, LAYOUT_INFLATER, argContainer);
         onCreateViewHolder.addStatement(
@@ -257,7 +275,7 @@ public class AdapterProcessor extends AbstractProcessor {
 
         onCreateViewHolder.addStatement("$T $L = ($T) $L.findViewById($L)", VIEW_GROUP, varContainerViewGroup, VIEW_GROUP, varContainer, parsingInfo.adapt.viewGroup());
 
-        String retStatement = "return new $T($L";
+        String retStatement = "return new $T($L, $L";
 
         for (int i = 0; i < parsingInfo.adapterInfo.size(); i++) {
             final RowInfo info = parsingInfo.adapterInfo.get(i);
@@ -272,8 +290,18 @@ public class AdapterProcessor extends AbstractProcessor {
         }
         retStatement += ")";
 
-        onCreateViewHolder.addStatement(retStatement, parsingInfo.vhClassName, varContainer);
+        onCreateViewHolder.addStatement(retStatement, parsingInfo.vhClassName, argViewType, varContainer);
 
+        onCreateViewHolder.endControlFlow();
+
+        if (!parsingInfo.abstractCreateViewHolder) {
+            onCreateViewHolder
+                    .beginControlFlow("else")
+                    .addStatement("return super.$L($L, $L)", METHOD_ONCREATE_VIEWHOLDER, argContainer, argViewType)
+                    .endControlFlow();
+        } else {
+            onCreateViewHolder.addStatement("throw new $T($L)", IllegalArgumentException.class, "String.format(\"Unsupported viewType %d\", " + argViewType + ")");
+        }
         return onCreateViewHolder;
     }
 
@@ -298,15 +326,24 @@ public class AdapterProcessor extends AbstractProcessor {
         TypeSpec.Builder holder = TypeSpec.classBuilder(vhName)
                 .superclass(VIEW_HOLDER);
 
+        final String argViewType = "viewType";
         final String argContainer = "container";
         final String root = "root";
+        final String viewType = "viewType";
         parsingInfo.vhRoot = root;
 
         holder.addField(VIEW, root);
+        holder.addField(
+                FieldSpec.builder(TypeName.INT, "viewType", Modifier.PUBLIC)
+                        .addModifiers(Modifier.FINAL)
+                        .build()
+        );
 
         MethodSpec.Builder ctor = MethodSpec.constructorBuilder()
+                .addParameter(TypeName.INT, argViewType)
                 .addParameter(VIEW_GROUP, argContainer)
                 .addStatement("super($L)", argContainer)
+                .addStatement("this.$L = $L", viewType, argViewType)
                 .addStatement("$L = $L", root, argContainer);
 
         for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
@@ -428,8 +465,10 @@ public class AdapterProcessor extends AbstractProcessor {
         private Adapt adapt;
         private DataInfo dataInfo;
         private ClassName vhClassName;
-        public ItemInfo itemInfo;
-        public String vhRoot;
+        private ItemInfo itemInfo;
+        private String vhRoot;
+        private TypeElement element;
+        private boolean abstractCreateViewHolder = true;
 
         private ParsingInfo(Element elem) {
             pkg = elementUtils.getPackageOf(elem);
