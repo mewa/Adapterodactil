@@ -10,9 +10,10 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 public @interface Row {
     int GENERATED_VIEW = 0xB4df00d;
+    int LAYOUT_NONE = -1;
 
     int num();
     int dataId();
-    int layout();
+    int layout() default LAYOUT_NONE;
     int viewType() default GENERATED_VIEW;
 }

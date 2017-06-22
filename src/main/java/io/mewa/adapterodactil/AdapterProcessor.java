@@ -79,6 +79,14 @@ public class AdapterProcessor extends AbstractProcessor {
         typeUtils = processingEnv.getTypeUtils();
     }
 
+    private boolean hasImpl(Element e, String method) {
+        for (Element element : e.getEnclosedElements()) {
+            if (element.getSimpleName().toString().equals(method))
+                return !element.getModifiers().contains(Modifier.ABSTRACT);
+        }
+        return false;
+    }
+
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
         plugins = new HashMap<>();
@@ -96,11 +104,7 @@ public class AdapterProcessor extends AbstractProcessor {
         parsingInfo.adapt = elem.getAnnotation(Adapt.class);
         parsingInfo.element = (TypeElement) elem;
 
-        for (Element element : elem.getEnclosedElements()) {
-            if (element.getSimpleName().toString().equals(METHOD_ONCREATE_VIEWHOLDER)) {
-                parsingInfo.abstractCreateViewHolder = element.getModifiers().contains(Modifier.ABSTRACT);
-            }
-        }
+        parsingInfo.abstractCreateViewHolder = !hasImpl(elem, METHOD_ONCREATE_VIEWHOLDER);
 
         for (Element member : elem.getEnclosedElements()) {
             if (member.getAnnotation(Row.class) != null)
@@ -122,15 +126,13 @@ public class AdapterProcessor extends AbstractProcessor {
         TypeSpec.Builder adapter = TypeSpec.classBuilder(parsingInfo.adapterName)
                 .addModifiers(Modifier.PUBLIC);
 
-        TypeSpec viewHolder = createViewHolder(viewHolderName);
+        createViewHolders(adapter, viewHolderName);
 
-        adapter.addType(viewHolder);
-
-        parsingInfo.vhClassName = ClassName.get(parsingInfo.pkg.getQualifiedName().toString(), parsingInfo.adapterName + "." + viewHolder.name);
+        parsingInfo.vhClassName = ClassName.get(parsingInfo.pkg.getQualifiedName().toString(), parsingInfo.adapterName + "." + viewHolderName);
 
         TypeElement superclass = (TypeElement) elem;
 
-        implementAdapter(adapter, viewHolder);
+        implementAdapter(adapter);
 
         /* Extend adapter using ViewHolder's name */
         adapter.superclass(ParameterizedTypeName.get(ClassName.get(superclass),
@@ -139,22 +141,26 @@ public class AdapterProcessor extends AbstractProcessor {
         return adapter.build();
     }
 
-    private void implementAdapter(TypeSpec.Builder adapter, TypeSpec viewHolder) {
+    private void implementAdapter(TypeSpec.Builder adapter) {
         implementDataLogic(adapter);
 
-        MethodSpec.Builder onCreateViewHolder = onCreateViewHolderImpl(adapter, viewHolder);
-        MethodSpec.Builder onBindViewHolder = onBindViewHolderImpl(adapter, viewHolder);
+        MethodSpec.Builder onCreateViewHolder = onCreateViewHolderImpl(adapter);
+        MethodSpec.Builder onBindViewHolder = onBindViewHolderImpl(adapter);
 
-        MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
-                .addParameter(TypeName.INT, "position")
-                .addModifiers(Modifier.PUBLIC)
-                .returns(TypeName.INT)
-                .addStatement("return $L", parsingInfo.adapterInfo.get(0).row.viewType());
+//
+//        if (!hasImpl(parsingInfo.element, "getItemViewType")) {
+//            MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
+//                    .addParameter(TypeName.INT, "position")
+//                    .addAnnotation(Override.class)
+//                    .addModifiers(Modifier.PUBLIC)
+//                    .returns(TypeName.INT)
+//                    .addStatement("return $L", parsingInfo.adapterInfo.get(0).get(0).row.viewType());
+//            adapter.addMethod(getItemViewType.build());
+//        }
 
         adapter
                 .addMethod(onCreateViewHolder.build())
-                .addMethod(onBindViewHolder.build())
-                .addMethod(getItemViewType.build());
+                .addMethod(onBindViewHolder.build());
     }
 
     private void implementDataLogic(TypeSpec.Builder adapter) {
@@ -203,54 +209,73 @@ public class AdapterProcessor extends AbstractProcessor {
         adapter.addMethod(itemCount.build());
     }
 
-    private MethodSpec.Builder onBindViewHolderImpl(TypeSpec.Builder adapter, TypeSpec viewHolder) {
+    private MethodSpec.Builder onBindViewHolderImpl(TypeSpec.Builder adapter) {
         final String argViewHolder = "vh";
         final String argPosition = "position";
 
         final String varData = "data";
 
-        MethodSpec.Builder onBindViewHolder = MethodSpec.methodBuilder("onBindViewHolder")
+        MethodSpec.Builder baseOnBindViewHolder = MethodSpec.methodBuilder("onBindViewHolder")
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(Override.class)
                 .addParameter(parsingInfo.vhClassName, argViewHolder)
                 .addParameter(TypeName.INT, argPosition);
 
-        // lazy way to extract Class at compile-time
-        // clazz is never null
-        TypeMirror clazz = null;
-        try {
-            parsingInfo.adapt.type();
-        } catch (MirroredTypeException e) {
-            clazz = e.getTypeMirror();
-        }
+        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
+            Integer viewType = viewTypeInfo.getKey();
 
-        onBindViewHolder.addStatement("$T $L = $L.get($L)", clazz, varData, parsingInfo.dataInfo.field, argPosition);
+            MethodSpec.Builder onBindViewHolder = MethodSpec.methodBuilder("onBindViewHolder" + viewType)
+                    .addModifiers(Modifier.PUBLIC)
+                    .addParameter(parsingInfo.vhClassName.peerClass(parsingInfo.vhClassName.simpleName() + viewType), argViewHolder)
+                    .addParameter(TypeName.INT, argPosition);
 
-        for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
-            RowInfo info = parsingInfo.adapterInfo.get(i);
-            String iRowValue = "rowValue" + i;
-            onBindViewHolder.addCode("\n");
-            onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
-            onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
-
-            onBindViewHolder.addStatement("$T $L = $L($L.$L, $L)", info.method.resultType, iRowValue, info.method.methodName, argViewHolder, info.fields.data, varData);
-
-            if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
-                CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
-                onBindViewHolder.addCode(statement);
+            // lazy way to extract Class at compile-time
+            // clazz is never null
+            TypeMirror clazz = null;
+            try {
+                parsingInfo.adapt.type();
+            } catch (MirroredTypeException e) {
+                clazz = e.getTypeMirror();
             }
-        }
 
-        // Item-wide properties handling
-        if (parsingInfo.itemInfo != null) {
-            onBindViewHolder.addCode("\n");
-            onBindViewHolder.addStatement("$L($L.$L, $L, $L)", parsingInfo.itemInfo.method, argViewHolder, parsingInfo.vhRoot, argPosition, varData);
-        }
+            onBindViewHolder.addStatement("$T $L = $L.get($L)", clazz, varData, parsingInfo.dataInfo.field, argPosition);
 
-        return onBindViewHolder;
+            for (int i = 0; i < viewTypeInfo.getValue().size(); ++i) {
+                RowInfo info = viewTypeInfo.getValue().get(i);
+                String iRowValue = "rowValue" + i;
+                onBindViewHolder.addCode("\n");
+                onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
+                onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
+
+                onBindViewHolder.addStatement("$T $L = $L($L.$L, $L)", info.method.resultType, iRowValue, info.method.methodName, argViewHolder, info.fields.data, varData);
+
+                if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
+                    CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
+                    onBindViewHolder.addCode(statement);
+                }
+            }
+
+            // Item-wide properties handling
+            if (parsingInfo.itemInfo != null) {
+                onBindViewHolder.addCode("\n");
+                onBindViewHolder.addStatement("$L($L.$L, $L, $L)", parsingInfo.itemInfo.method, argViewHolder, parsingInfo.vhRoot, argPosition, varData);
+            }
+
+            MethodSpec method = onBindViewHolder.build();
+            adapter.addMethod(method);
+
+            ClassName vhClass = parsingInfo.vhClassName.peerClass(parsingInfo.vhClassName.simpleName() + viewType);
+
+            baseOnBindViewHolder
+                    .beginControlFlow("if ($L.$L == $L)", argViewHolder, "viewType", viewType)
+                    .addStatement("$L(($T) $L, $L)", method.name, vhClass, argViewHolder, argPosition)
+                    .addStatement("return")
+                    .endControlFlow();
+        }
+        return baseOnBindViewHolder;
     }
 
-    private MethodSpec.Builder onCreateViewHolderImpl(TypeSpec.Builder adapter, TypeSpec viewHolder) {
+    private MethodSpec.Builder onCreateViewHolderImpl(TypeSpec.Builder adapter) {
         final String argContainer = "container";
         final String argViewType = "viewType";
 
@@ -265,34 +290,42 @@ public class AdapterProcessor extends AbstractProcessor {
                 .addParameter(VIEW_GROUP, argContainer)
                 .addParameter(TypeName.INT, argViewType);
 
-        onCreateViewHolder.beginControlFlow("if ($L == $L)", argViewType, parsingInfo.adapterInfo.get(0).row.viewType());
+        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
+            Integer viewType = viewTypeInfo.getKey();
 
-        onCreateViewHolder.addStatement("$T $L = $L.from($L.getContext())", LAYOUT_INFLATER, varInflater, LAYOUT_INFLATER, argContainer);
-        onCreateViewHolder.addStatement(
-                "$T $L = ($T) $L.inflate($L, $L, false)",
-                VIEW_GROUP, varContainer, VIEW_GROUP, varInflater, parsingInfo.adapt.layout(), argContainer);
+            onCreateViewHolder.beginControlFlow("if ($L == $L)", argViewType, viewType);
 
-
-        onCreateViewHolder.addStatement("$T $L = ($T) $L.findViewById($L)", VIEW_GROUP, varContainerViewGroup, VIEW_GROUP, varContainer, parsingInfo.adapt.viewGroup());
-
-        String retStatement = "return new $T($L, $L";
-
-        for (int i = 0; i < parsingInfo.adapterInfo.size(); i++) {
-            final RowInfo info = parsingInfo.adapterInfo.get(i);
-            final String iRow = "row" + i;
+            onCreateViewHolder.addStatement("$T $L = $L.from($L.getContext())", LAYOUT_INFLATER, varInflater, LAYOUT_INFLATER, argContainer);
             onCreateViewHolder.addStatement(
-                    "$T $L = $L.inflate($L, $L, false)",
-                    VIEW, iRow, varInflater, info.row.layout(), varContainerViewGroup)
-                    .addStatement(
-                            "$L.addView($L)", varContainerViewGroup, iRow
-                    );
-            retStatement += ", " + iRow;
+                    "$T $L = ($T) $L.inflate($L, $L, false)",
+                    VIEW_GROUP, varContainer, VIEW_GROUP, varInflater, parsingInfo.adapt.layout(), argContainer);
+
+
+            onCreateViewHolder.addStatement("$T $L = ($T) $L.findViewById($L)", VIEW_GROUP, varContainerViewGroup, VIEW_GROUP, varContainer, parsingInfo.adapt.viewGroup());
+
+            String retStatement = "return new $T($L, $L";
+
+            for (int i = 0; i < viewTypeInfo.getValue().size(); i++) {
+                final RowInfo info = viewTypeInfo.getValue().get(i);
+                final String iRow = "row" + i;
+                if (info.row.layout() == Row.LAYOUT_NONE) {
+                    onCreateViewHolder.addStatement("$T $L = $L", VIEW, iRow, varContainer);
+                } else {
+                    onCreateViewHolder.addStatement(
+                            "$T $L = $L.inflate($L, $L, false)",
+                            VIEW, iRow, varInflater, info.row.layout(), varContainerViewGroup)
+                            .addStatement(
+                                    "$L.addView($L)", varContainerViewGroup, iRow
+                            );
+                }
+                retStatement += ", " + iRow;
+            }
+            retStatement += ")";
+            final ClassName typedViewHolderClass = parsingInfo.vhClassName.peerClass(parsingInfo.vhClassName.simpleName() + String.valueOf(viewTypeInfo.getKey()));
+            onCreateViewHolder.addStatement(retStatement, typedViewHolderClass, argViewType, varContainer);
+
+            onCreateViewHolder.endControlFlow();
         }
-        retStatement += ")";
-
-        onCreateViewHolder.addStatement(retStatement, parsingInfo.vhClassName, argViewType, varContainer);
-
-        onCreateViewHolder.endControlFlow();
 
         if (!parsingInfo.abstractCreateViewHolder) {
             onCreateViewHolder
@@ -319,12 +352,14 @@ public class AdapterProcessor extends AbstractProcessor {
     /**
      * Creates ViewHolder TypeSpec
      *
+     * @param adapter
      * @param vhName
      * @return
      */
-    private TypeSpec createViewHolder(String vhName) {
-        TypeSpec.Builder holder = TypeSpec.classBuilder(vhName)
-                .superclass(VIEW_HOLDER);
+    private void createViewHolders(TypeSpec.Builder adapter, String vhName) {
+        TypeSpec.Builder baseHolder = TypeSpec.classBuilder(vhName)
+                .superclass(VIEW_HOLDER)
+                .addModifiers(Modifier.ABSTRACT, Modifier.PUBLIC, Modifier.STATIC);
 
         final String argViewType = "viewType";
         final String argContainer = "container";
@@ -332,50 +367,68 @@ public class AdapterProcessor extends AbstractProcessor {
         final String viewType = "viewType";
         parsingInfo.vhRoot = root;
 
-        holder.addField(VIEW, root);
-        holder.addField(
+        baseHolder.addField(VIEW, root, Modifier.PUBLIC);
+        baseHolder.addField(
                 FieldSpec.builder(TypeName.INT, "viewType", Modifier.PUBLIC)
                         .addModifiers(Modifier.FINAL)
                         .build()
         );
 
-        MethodSpec.Builder ctor = MethodSpec.constructorBuilder()
+        MethodSpec.Builder baseCtor = MethodSpec.constructorBuilder()
                 .addParameter(TypeName.INT, argViewType)
                 .addParameter(VIEW_GROUP, argContainer)
                 .addStatement("super($L)", argContainer)
                 .addStatement("this.$L = $L", viewType, argViewType)
                 .addStatement("$L = $L", root, argContainer);
 
-        for (int i = 0; i < parsingInfo.adapterInfo.size(); ++i) {
-            RowInfo info = parsingInfo.adapterInfo.get(i);
-            final String iView = "view" + i;
-            final String iLabel = "label" + i;
-            final String iData = "data" + i;
+        baseHolder.addMethod(baseCtor.build());
 
-            info.fields = new RowInfo.Fields(iLabel, iData);
+        adapter.addType(baseHolder.build());
 
-            TypeName paramType = TypeName.get(info.method.paramType);
+        final String base = parsingInfo.pkg.toString() + "." + parsingInfo.adapterName;
 
-            ctor.addParameter(VIEW, iView);
-            holder.addField(paramType, iData);
+        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
+            TypeSpec.Builder holder = TypeSpec.classBuilder(vhName + viewTypeInfo.getKey())
+                    .addModifiers(Modifier.STATIC, Modifier.PUBLIC)
+                    .superclass(ClassName.get(base, baseHolder.build().name));
 
-            String labelValue = info.label != null ? info.label.value() : "*none*";
-            ctor.addComment(String.format(Locale.US, "%s %d, label: %s", Row.class.getSimpleName(), info.row.num(), labelValue));
-            if (info.label != null) {
-                holder.addField(TEXT_VIEW, iLabel);
-                ctor.addCode(
-                        CodeBlock.builder()
-                                .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
-                                .beginControlFlow("if ($L != null)", iLabel)
-                                .addStatement("$L.setText($S)", iLabel, info.label.value())
-                                .endControlFlow()
-                                .build()
-                );
+            MethodSpec.Builder ctor = MethodSpec.constructorBuilder()
+                    .addParameter(TypeName.INT, argViewType)
+                    .addParameter(VIEW_GROUP, argContainer)
+                    .addStatement("super($L, $L)", argViewType, argContainer);
+
+            for (int i = 0; i < viewTypeInfo.getValue().size(); ++i) {
+                RowInfo info = viewTypeInfo.getValue().get(i);
+
+                final String iView = "view" + i;
+                final String iLabel = "label" + i;
+                final String iData = "data" + i;
+
+                info.fields = new RowInfo.Fields(iLabel, iData);
+
+                TypeName paramType = TypeName.get(info.method.paramType);
+
+                ctor.addParameter(VIEW, iView);
+                holder.addField(paramType, iData);
+
+                String labelValue = info.label != null ? info.label.value() : "*none*";
+                ctor.addComment(String.format(Locale.US, "%s %d, label: %s", Row.class.getSimpleName(), info.row.num(), labelValue));
+                if (info.label != null) {
+                    holder.addField(TEXT_VIEW, iLabel);
+                    ctor.addCode(
+                            CodeBlock.builder()
+                                    .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
+                                    .beginControlFlow("if ($L != null)", iLabel)
+                                    .addStatement("$L.setText($S)", iLabel, info.label.value())
+                                    .endControlFlow()
+                                    .build()
+                    );
+                }
+                ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, info.row.dataId());
             }
-            ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, info.row.dataId());
+            holder.addMethod(ctor.build());
+            adapter.addType(holder.build());
         }
-        holder.addMethod(ctor.build());
-        return holder.build();
     }
 
     private void parseRow(ExecutableElement elem) {
@@ -394,7 +447,12 @@ public class AdapterProcessor extends AbstractProcessor {
 
         MethodInfo methodInfo = new MethodInfo(elem.getReturnType(), elem.getParameters().get(0).asType(), method);
 
-        parsingInfo.adapterInfo.put(row.num(), new RowInfo(row, label, overridePlugin, methodInfo, pluginInfo));
+        Map<Integer, RowInfo> viewTypeInfo = parsingInfo.adapterInfo.get(row.viewType());
+        if (viewTypeInfo == null) {
+            viewTypeInfo = new HashMap<>();
+            parsingInfo.adapterInfo.put(row.viewType(), viewTypeInfo);
+        }
+        viewTypeInfo.put(row.num(), new RowInfo(row, label, overridePlugin, methodInfo, pluginInfo));
     }
 
     // TODO: this may prove useful once a plugin system gets implemented
@@ -461,7 +519,7 @@ public class AdapterProcessor extends AbstractProcessor {
     private class ParsingInfo {
         private String adapterName;
         private PackageElement pkg;
-        private Map<Integer, RowInfo> adapterInfo;
+        private Map<Integer, Map<Integer, RowInfo>> adapterInfo;
         private Adapt adapt;
         private DataInfo dataInfo;
         private ClassName vhClassName;
