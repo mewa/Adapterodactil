@@ -320,12 +320,12 @@ public class AdapterProcessor extends AbstractProcessor {
             TypeName paramType = TypeName.get(info.method.paramType);
 
             ctor.addParameter(VIEW, iView);
-            holder.addField(TEXT_VIEW, iLabel);
             holder.addField(paramType, iData);
 
             String labelValue = info.label != null ? info.label.value() : "*none*";
-            ctor.addComment(String.format(Locale.US, "%s %d, label: \"%s\"", Row.class.getSimpleName(), info.row.num(), labelValue));
+            ctor.addComment(String.format(Locale.US, "%s %d, label: %s", Row.class.getSimpleName(), info.row.num(), labelValue));
             if (info.label != null) {
+                holder.addField(TEXT_VIEW, iLabel);
                 ctor.addCode(
                         CodeBlock.builder()
                                 .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
