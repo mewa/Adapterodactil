@@ -147,16 +147,16 @@ public class AdapterProcessor extends AbstractProcessor {
         MethodSpec.Builder onCreateViewHolder = onCreateViewHolderImpl(adapter);
         MethodSpec.Builder onBindViewHolder = onBindViewHolderImpl(adapter);
 
-//
-//        if (!hasImpl(parsingInfo.element, "getItemViewType")) {
-//            MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
-//                    .addParameter(TypeName.INT, "position")
-//                    .addAnnotation(Override.class)
-//                    .addModifiers(Modifier.PUBLIC)
-//                    .returns(TypeName.INT)
-//                    .addStatement("return $L", parsingInfo.adapterInfo.get(0).get(0).row.viewType());
-//            adapter.addMethod(getItemViewType.build());
-//        }
+
+        if (!hasImpl(parsingInfo.element, "getItemViewType") && parsingInfo.adapterInfo.size() <= 1) {
+            MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
+                    .addParameter(TypeName.INT, "position")
+                    .addAnnotation(Override.class)
+                    .addModifiers(Modifier.PUBLIC)
+                    .returns(TypeName.INT)
+                    .addStatement("return $L", parsingInfo.adapterInfo.values().iterator().next().get(0).row.viewType());
+            adapter.addMethod(getItemViewType.build());
+        }
 
         adapter
                 .addMethod(onCreateViewHolder.build())
