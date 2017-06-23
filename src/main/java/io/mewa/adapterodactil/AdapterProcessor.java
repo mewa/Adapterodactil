@@ -46,6 +46,7 @@ import io.mewa.adapterodactil.annotations.Item;
 import io.mewa.adapterodactil.annotations.Label;
 import io.mewa.adapterodactil.annotations.OverridePlugin;
 import io.mewa.adapterodactil.annotations.Row;
+import io.mewa.adapterodactil.annotations.ViewType;
 import io.mewa.adapterodactil.plugins.IgnorePlugin;
 import io.mewa.adapterodactil.plugins.Plugin;
 import io.mewa.adapterodactil.plugins.TextViewPlugin;
@@ -107,10 +108,12 @@ public class AdapterProcessor extends AbstractProcessor {
         parsingInfo.abstractCreateViewHolder = !hasImpl(elem, METHOD_ONCREATE_VIEWHOLDER);
 
         for (Element member : elem.getEnclosedElements()) {
-            if (member.getAnnotation(Row.class) != null)
-                parseRow((ExecutableElement) member);
             if (member.getAnnotation(Data.class) != null)
                 parseData((ExecutableElement) member);
+
+            if (member.getAnnotation(ViewType.class) != null) {
+                parseViewType((TypeElement) member);
+            }
             if (member.getAnnotation(Item.class) != null)
                 parseItem((ExecutableElement) member);
         }
@@ -118,6 +121,16 @@ public class AdapterProcessor extends AbstractProcessor {
         TypeSpec adapter = createAdapter(elem);
 
         emit(parsingInfo.pkg, adapter);
+    }
+
+    private void parseViewType(TypeElement elem) {
+        ViewType viewType = elem.getAnnotation(ViewType.class);
+
+        messager.printMessage(Diagnostic.Kind.OTHER, "Parsing viewType: " + viewType.value());
+        for (Element member : elem.getEnclosedElements()) {
+            if (member.getAnnotation(Row.class) != null)
+                parseRow(elem, (ExecutableElement) member, viewType.value());
+        }
     }
 
     private TypeSpec createAdapter(Element elem) {
@@ -148,13 +161,14 @@ public class AdapterProcessor extends AbstractProcessor {
         MethodSpec.Builder onBindViewHolder = onBindViewHolderImpl(adapter);
 
 
+        // if there are more than 1 view types user has to supply the relevant function
         if (!hasImpl(parsingInfo.element, "getItemViewType") && parsingInfo.adapterInfo.size() <= 1) {
             MethodSpec.Builder getItemViewType = MethodSpec.methodBuilder("getItemViewType")
                     .addParameter(TypeName.INT, "position")
                     .addAnnotation(Override.class)
                     .addModifiers(Modifier.PUBLIC)
                     .returns(TypeName.INT)
-                    .addStatement("return $L", parsingInfo.adapterInfo.values().iterator().next().get(0).row.viewType());
+                    .addStatement("return $L", parsingInfo.adapterInfo.values().iterator().next().viewType);
             adapter.addMethod(getItemViewType.build());
         }
 
@@ -199,6 +213,11 @@ public class AdapterProcessor extends AbstractProcessor {
                                 .build()
                 );
 
+        MethodSpec.Builder dataGetter = MethodSpec.methodBuilder("getStored_" + dataInfo.field)
+                .addModifiers(Modifier.PROTECTED)
+                .returns(ClassName.get(inputData.asType()))
+                .addStatement("return $L", dataInfo.field);
+
         MethodSpec.Builder itemCount = MethodSpec.methodBuilder("getItemCount")
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(Override.class)
@@ -206,6 +225,7 @@ public class AdapterProcessor extends AbstractProcessor {
                 .addStatement("return $L.size()", dataInfo.field);
 
         adapter.addMethod(dataSetter.build());
+        adapter.addMethod(dataGetter.build());
         adapter.addMethod(itemCount.build());
     }
 
@@ -221,8 +241,8 @@ public class AdapterProcessor extends AbstractProcessor {
                 .addParameter(parsingInfo.vhClassName, argViewHolder)
                 .addParameter(TypeName.INT, argPosition);
 
-        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
-            Integer viewType = viewTypeInfo.getKey();
+        for (ViewTypeInfo viewTypeInfo : parsingInfo.adapterInfo.values()) {
+            Integer viewType = viewTypeInfo.viewType;
 
             MethodSpec.Builder onBindViewHolder = MethodSpec.methodBuilder("onBindViewHolder" + viewType)
                     .addModifiers(Modifier.PUBLIC)
@@ -240,14 +260,14 @@ public class AdapterProcessor extends AbstractProcessor {
 
             onBindViewHolder.addStatement("$T $L = $L.get($L)", clazz, varData, parsingInfo.dataInfo.field, argPosition);
 
-            for (int i = 0; i < viewTypeInfo.getValue().size(); ++i) {
-                RowInfo info = viewTypeInfo.getValue().get(i);
+            for (int i = 0; i < viewTypeInfo.rows.size(); ++i) {
+                RowInfo info = viewTypeInfo.rows.get(i);
                 String iRowValue = "rowValue" + i;
                 onBindViewHolder.addCode("\n");
                 onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
                 onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
 
-                onBindViewHolder.addStatement("$T $L = $L($L.$L, $L)", info.method.resultType, iRowValue, info.method.methodName, argViewHolder, info.fields.data, varData);
+                onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L)", info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
 
                 if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
                     CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
@@ -290,8 +310,8 @@ public class AdapterProcessor extends AbstractProcessor {
                 .addParameter(VIEW_GROUP, argContainer)
                 .addParameter(TypeName.INT, argViewType);
 
-        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
-            Integer viewType = viewTypeInfo.getKey();
+        for (ViewTypeInfo viewTypeInfo : parsingInfo.adapterInfo.values()) {
+            Integer viewType = viewTypeInfo.viewType;
 
             onCreateViewHolder.beginControlFlow("if ($L == $L)", argViewType, viewType);
 
@@ -305,8 +325,8 @@ public class AdapterProcessor extends AbstractProcessor {
 
             String retStatement = "return new $T($L, $L";
 
-            for (int i = 0; i < viewTypeInfo.getValue().size(); i++) {
-                final RowInfo info = viewTypeInfo.getValue().get(i);
+            for (int i = 0; i < viewTypeInfo.rows.size(); i++) {
+                final RowInfo info = viewTypeInfo.rows.get(i);
                 final String iRow = "row" + i;
                 if (info.row.layout() == Row.LAYOUT_NONE) {
                     onCreateViewHolder.addStatement("$T $L = $L", VIEW, iRow, varContainer);
@@ -321,7 +341,10 @@ public class AdapterProcessor extends AbstractProcessor {
                 retStatement += ", " + iRow;
             }
             retStatement += ")";
-            final ClassName typedViewHolderClass = parsingInfo.vhClassName.peerClass(parsingInfo.vhClassName.simpleName() + String.valueOf(viewTypeInfo.getKey()));
+
+            final ClassName typedViewHolderClass = parsingInfo.vhClassName
+                    .peerClass(parsingInfo.vhClassName.simpleName() + String.valueOf(viewTypeInfo.viewType));
+
             onCreateViewHolder.addStatement(retStatement, typedViewHolderClass, argViewType, varContainer);
 
             onCreateViewHolder.endControlFlow();
@@ -387,8 +410,9 @@ public class AdapterProcessor extends AbstractProcessor {
 
         final String base = parsingInfo.pkg.toString() + "." + parsingInfo.adapterName;
 
-        for (Map.Entry<Integer, Map<Integer, RowInfo>> viewTypeInfo : parsingInfo.adapterInfo.entrySet()) {
-            TypeSpec.Builder holder = TypeSpec.classBuilder(vhName + viewTypeInfo.getKey())
+        for (ViewTypeInfo viewTypeInfo : parsingInfo.adapterInfo.values()) {
+
+            TypeSpec.Builder holder = TypeSpec.classBuilder(vhName + viewTypeInfo.viewType)
                     .addModifiers(Modifier.STATIC, Modifier.PUBLIC)
                     .superclass(ClassName.get(base, baseHolder.build().name));
 
@@ -397,8 +421,8 @@ public class AdapterProcessor extends AbstractProcessor {
                     .addParameter(VIEW_GROUP, argContainer)
                     .addStatement("super($L, $L)", argViewType, argContainer);
 
-            for (int i = 0; i < viewTypeInfo.getValue().size(); ++i) {
-                RowInfo info = viewTypeInfo.getValue().get(i);
+            for (int i = 0; i < viewTypeInfo.rows.size(); ++i) {
+                RowInfo info = viewTypeInfo.rows.get(i);
 
                 final String iView = "view" + i;
                 final String iLabel = "label" + i;
@@ -431,11 +455,14 @@ public class AdapterProcessor extends AbstractProcessor {
         }
     }
 
-    private void parseRow(ExecutableElement elem) {
+    private void parseRow(TypeElement viewTypeAdapter, ExecutableElement elem, int viewType) {
         Row row = elem.getAnnotation(Row.class);
         Label label = elem.getAnnotation(Label.class);
         OverridePlugin overridePlugin = elem.getAnnotation(OverridePlugin.class);
         final String method = elem.getSimpleName().toString();
+
+        if (!elem.getModifiers().contains(Modifier.STATIC))
+            throw new IllegalArgumentException("@Row annotated method must be static");
 
         String typeName = elem.getParameters().get(0).asType().toString();
 
@@ -447,12 +474,12 @@ public class AdapterProcessor extends AbstractProcessor {
 
         MethodInfo methodInfo = new MethodInfo(elem.getReturnType(), elem.getParameters().get(0).asType(), method);
 
-        Map<Integer, RowInfo> viewTypeInfo = parsingInfo.adapterInfo.get(row.viewType());
+        ViewTypeInfo viewTypeInfo = parsingInfo.adapterInfo.get(viewType);
         if (viewTypeInfo == null) {
-            viewTypeInfo = new HashMap<>();
-            parsingInfo.adapterInfo.put(row.viewType(), viewTypeInfo);
+            viewTypeInfo = new ViewTypeInfo(viewType, viewTypeAdapter);
+            parsingInfo.adapterInfo.put(viewType, viewTypeInfo);
         }
-        viewTypeInfo.put(row.num(), new RowInfo(row, label, overridePlugin, methodInfo, pluginInfo));
+        viewTypeInfo.rows.put(row.num(), new RowInfo(row, label, overridePlugin, methodInfo, pluginInfo));
     }
 
     // TODO: this may prove useful once a plugin system gets implemented
@@ -498,6 +525,9 @@ public class AdapterProcessor extends AbstractProcessor {
     }
 
     private void parseItem(ExecutableElement elem) {
+        if (elem.getParameters().size() != 3) {
+            throw new IllegalArgumentException("Invalid @Item signature. Expecting 3 arguments (view, position, data)");
+        }
         parsingInfo.itemInfo = new ItemInfo(elem, elem.getSimpleName().toString(), elem.getParameters().get(0).asType());
     }
 
@@ -519,7 +549,7 @@ public class AdapterProcessor extends AbstractProcessor {
     private class ParsingInfo {
         private String adapterName;
         private PackageElement pkg;
-        private Map<Integer, Map<Integer, RowInfo>> adapterInfo;
+        private Map<Integer, ViewTypeInfo> adapterInfo;
         private Adapt adapt;
         private DataInfo dataInfo;
         private ClassName vhClassName;
@@ -611,6 +641,18 @@ public class AdapterProcessor extends AbstractProcessor {
                 this.label = label;
                 this.data = data;
             }
+        }
+    }
+
+    private class ViewTypeInfo {
+        public final int viewType;
+        public final TypeElement viewTypeAdapter;
+        public final Map<Integer, RowInfo> rows;
+
+        private ViewTypeInfo(int viewType, TypeElement viewTypeAdapter) {
+            this.viewType = viewType;
+            this.viewTypeAdapter = viewTypeAdapter;
+            this.rows = new HashMap<>();
         }
     }
 }
