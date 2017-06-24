@@ -3,9 +3,15 @@ apply plugin: 'java'
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
     // https://mvnrepository.com/artifact/com.google.auto.service/auto-service
-    compile 'com.google.auto.service:auto-service:1.0-rc1'
+    compileOnly 'com.google.auto.service:auto-service:1.0-rc1'
     compile 'com.squareup:javapoet:1.9.0'
 }
+
+def major = 0
+def minor = 1
+def fix = 0
+
+version = "$major.$minor.$fix"
 
 sourceCompatibility = "1.7"
 targetCompatibility = "1.7"
