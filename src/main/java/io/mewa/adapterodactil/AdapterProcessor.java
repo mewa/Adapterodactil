@@ -267,7 +267,12 @@ public class AdapterProcessor extends AbstractProcessor {
                 onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
                 onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
 
-                onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L)", info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
+                if (ClassName.get(info.method.resultType) != TypeName.VOID) {
+                    onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L)",
+                            info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
+                } else {
+                    onBindViewHolder.addStatement("$T.$L($L.$L, $L)", viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
+                }
 
                 if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
                     CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
