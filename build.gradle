@@ -3,13 +3,13 @@ apply plugin: 'java'
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
     // https://mvnrepository.com/artifact/com.google.auto.service/auto-service
-    compileOnly 'com.google.auto.service:auto-service:1.0-rc1'
+    compileOnly 'com.google.auto.service:auto-service:1.0-rc3'
     compile 'com.squareup:javapoet:1.9.0'
 }
 
 def major = 0
 def minor = 1
-def fix = 0
+def fix = 2
 
 version = "$major.$minor.$fix"
 
