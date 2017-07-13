@@ -144,13 +144,13 @@ public class AdapterProcessor extends AbstractProcessor {
         parsingInfo.vhClassName = ClassName.get(parsingInfo.pkg.getQualifiedName().toString(), parsingInfo.adapterName + "." + viewHolderName);
 
         TypeElement superclass = (TypeElement) elem;
-
-        implementAdapter(adapter);
-
         /* Extend adapter using ViewHolder's name */
         adapter.superclass(ParameterizedTypeName.get(ClassName.get(superclass),
                 parsingInfo.vhClassName
         ));
+
+        implementAdapter(adapter);
+
         return adapter.build();
     }
 
@@ -175,6 +175,10 @@ public class AdapterProcessor extends AbstractProcessor {
         adapter
                 .addMethod(onCreateViewHolder.build())
                 .addMethod(onBindViewHolder.build());
+
+        for (ViewTypeInfo viewTypeInfo : parsingInfo.adapterInfo.values()) {
+            adapter.addField(TypeName.get(typeUtils.erasure(viewTypeInfo.viewTypeAdapter.asType())), viewTypeInfo.viewTypeAdapter.getSimpleName().toString());
+        }
     }
 
     private void implementDataLogic(TypeSpec.Builder adapter) {
@@ -272,11 +276,11 @@ public class AdapterProcessor extends AbstractProcessor {
                     onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
 
                     if (ClassName.get(info.method.resultType) != TypeName.VOID) {
-                        onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L, $L)",
-                                info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(),
+                        onBindViewHolder.addStatement("$T $L = $L.$L($L.$L, $L, $L)",
+                                info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.getSimpleName(),
                                 info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
                     } else {
-                        onBindViewHolder.addStatement("$T.$L($L.$L, $L, $L)", viewTypeInfo.viewTypeAdapter.asType(),
+                        onBindViewHolder.addStatement("$L.$L($L.$L, $L, $L)", viewTypeInfo.viewTypeAdapter.getSimpleName(),
                                 info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
                     }
 
@@ -478,8 +482,8 @@ public class AdapterProcessor extends AbstractProcessor {
         OverridePlugin overridePlugin = elem.getAnnotation(OverridePlugin.class);
         final String method = elem.getSimpleName().toString();
 
-        if (!elem.getModifiers().contains(Modifier.STATIC))
-            throw new IllegalArgumentException("@Row annotated method must be static");
+        if (elem.getModifiers().contains(Modifier.STATIC))
+            throw new IllegalArgumentException("@Row annotated method must not be static");
 
         String typeName = elem.getParameters().get(0).asType().toString();
 
