@@ -8,8 +8,8 @@ dependencies {
 }
 
 def major = 0
-def minor = 1
-def fix = 2
+def minor = 2
+def fix = 0
 
 version = "$major.$minor.$fix"
 
