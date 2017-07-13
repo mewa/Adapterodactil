@@ -12,6 +12,6 @@ public @interface Row {
     int LAYOUT_NONE = -1;
 
     int num();
-    int dataId();
+    int[] dataId();
     int layout() default LAYOUT_NONE;
 }

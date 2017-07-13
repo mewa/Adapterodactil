@@ -262,21 +262,28 @@ public class AdapterProcessor extends AbstractProcessor {
 
             for (int i = 0; i < viewTypeInfo.rows.size(); ++i) {
                 RowInfo info = viewTypeInfo.rows.get(i);
-                String iRowValue = "rowValue" + i;
-                onBindViewHolder.addCode("\n");
-                onBindViewHolder.addComment("$L $L generated using $L", Row.class.getSimpleName(), i, info.pluginInfo.plugin.getClass().getSimpleName());
-                onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
 
-                if (ClassName.get(info.method.resultType) != TypeName.VOID) {
-                    onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L)",
-                            info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
-                } else {
-                    onBindViewHolder.addStatement("$T.$L($L.$L, $L)", viewTypeInfo.viewTypeAdapter.asType(), info.method.methodName, argViewHolder, info.fields.data, varData);
-                }
+                for (int dataNum = 0; dataNum < info.row.dataId().length; dataNum++) {
+                    int dataId = info.row.dataId()[dataNum];
 
-                if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
-                    CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
-                    onBindViewHolder.addCode(statement);
+                    String iRowValue = "rowValue" + i + dataId;
+                    onBindViewHolder.addCode("\n");
+                    onBindViewHolder.addComment("$L $L, data $L, generated using $L", Row.class.getSimpleName(), i, dataNum, info.pluginInfo.plugin.getClass().getSimpleName());
+                    onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
+
+                    if (ClassName.get(info.method.resultType) != TypeName.VOID) {
+                        onBindViewHolder.addStatement("$T $L = $T.$L($L.$L, $L, $L)",
+                                info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.asType(),
+                                info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
+                    } else {
+                        onBindViewHolder.addStatement("$T.$L($L.$L, $L, $L)", viewTypeInfo.viewTypeAdapter.asType(),
+                                info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
+                    }
+
+                    if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
+                        CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
+                        onBindViewHolder.addCode(statement);
+                    }
                 }
             }
 
@@ -333,6 +340,7 @@ public class AdapterProcessor extends AbstractProcessor {
             for (int i = 0; i < viewTypeInfo.rows.size(); i++) {
                 final RowInfo info = viewTypeInfo.rows.get(i);
                 final String iRow = "row" + i;
+
                 if (info.row.layout() == Row.LAYOUT_NONE) {
                     onCreateViewHolder.addStatement("$T $L = $L", VIEW, iRow, varContainer);
                 } else {
@@ -428,32 +436,36 @@ public class AdapterProcessor extends AbstractProcessor {
 
             for (int i = 0; i < viewTypeInfo.rows.size(); ++i) {
                 RowInfo info = viewTypeInfo.rows.get(i);
-
                 final String iView = "view" + i;
-                final String iLabel = "label" + i;
-                final String iData = "data" + i;
-
-                info.fields = new RowInfo.Fields(iLabel, iData);
-
-                TypeName paramType = TypeName.get(info.method.paramType);
-
                 ctor.addParameter(VIEW, iView);
-                holder.addField(paramType, iData);
 
-                String labelValue = info.label != null ? info.label.value() : "*none*";
-                ctor.addComment(String.format(Locale.US, "%s %d, label: %s", Row.class.getSimpleName(), info.row.num(), labelValue));
-                if (info.label != null) {
-                    holder.addField(TEXT_VIEW, iLabel);
-                    ctor.addCode(
-                            CodeBlock.builder()
-                                    .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
-                                    .beginControlFlow("if ($L != null)", iLabel)
-                                    .addStatement("$L.setText($S)", iLabel, info.label.value())
-                                    .endControlFlow()
-                                    .build()
-                    );
+                for (int dataNum = 0; dataNum < info.row.dataId().length; dataNum++) {
+                    int dataId = info.row.dataId()[dataNum];
+
+                    final String iLabel = "label" + i;
+                    final String iData = "data" + i + dataNum;
+
+                    info.fields = new RowInfo.Fields(iLabel, iData);
+
+                    TypeName paramType = TypeName.get(info.method.paramType);
+
+                    holder.addField(paramType, iData);
+
+                    String labelValue = info.label != null ? info.label.value() : "*none*";
+                    ctor.addComment(String.format(Locale.US, "%s %d, data %d, label: %s", Row.class.getSimpleName(), info.row.num(), dataNum, labelValue));
+                    if (info.label != null) {
+                        holder.addField(TEXT_VIEW, iLabel);
+                        ctor.addCode(
+                                CodeBlock.builder()
+                                        .addStatement("$L = ($T) $L.findViewById($L)", iLabel, TEXT_VIEW, iView, info.label.id())
+                                        .beginControlFlow("if ($L != null)", iLabel)
+                                        .addStatement("$L.setText($S)", iLabel, info.label.value())
+                                        .endControlFlow()
+                                        .build()
+                        );
+                    }
+                    ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, dataId);
                 }
-                ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, info.row.dataId());
             }
             holder.addMethod(ctor.build());
             adapter.addType(holder.build());

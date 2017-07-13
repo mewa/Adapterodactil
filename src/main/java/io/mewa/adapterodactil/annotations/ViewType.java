@@ -9,5 +9,5 @@ import java.lang.annotation.Target;
 
 @Target(ElementType.TYPE)
 public @interface ViewType {
-    int value();
+    int value() default 0;
 }
