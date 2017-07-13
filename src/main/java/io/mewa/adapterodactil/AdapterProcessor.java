@@ -53,15 +53,16 @@ import io.mewa.adapterodactil.plugins.TextViewPlugin;
 
 @AutoService(Processor.class)
 public class AdapterProcessor extends AbstractProcessor {
-    private final static ClassName VIEW = ClassName.get("android.view", "View");
-    private final static ClassName VIEW_GROUP = ClassName.get("android.view", "ViewGroup");
-    private final static ClassName TEXT_VIEW = ClassName.get("android.widget", "TextView");
-    private final static ClassName RECYCLER_VIEW = ClassName.get("android.support.v7.widget", "RecyclerView");
-    private final static ClassName ADAPTER = ClassName.get("android.support.v7.widget.RecyclerView", "Adapter");
-    private final static ClassName VIEW_HOLDER = ClassName.get("android.support.v7.widget.RecyclerView", "ViewHolder");
-    private final static ClassName LAYOUT_INFLATER = ClassName.get("android.view", "LayoutInflater");
+    private static final ClassName VIEW = ClassName.get("android.view", "View");
+    private static final ClassName VIEW_GROUP = ClassName.get("android.view", "ViewGroup");
+    private static final ClassName TEXT_VIEW = ClassName.get("android.widget", "TextView");
+    private static final ClassName RECYCLER_VIEW = ClassName.get("android.support.v7.widget", "RecyclerView");
+    private static final ClassName RECYCLER_VIEW_VIEW_HOLDER = RECYCLER_VIEW.nestedClass("ViewHolder");
+    private static final ClassName ADAPTER = ClassName.get("android.support.v7.widget.RecyclerView", "Adapter");
+    private static final ClassName VIEW_HOLDER = ClassName.get("android.support.v7.widget.RecyclerView", "ViewHolder");
+    private static final ClassName LAYOUT_INFLATER = ClassName.get("android.view", "LayoutInflater");
 
-    private final static String METHOD_ONCREATE_VIEWHOLDER = "onCreateViewHolder";
+    private static final String METHOD_ONCREATE_VIEWHOLDER = "onCreateViewHolder";
 
     private Messager messager;
     private Filer filer;
@@ -118,7 +119,7 @@ public class AdapterProcessor extends AbstractProcessor {
                 parseItem((ExecutableElement) member);
         }
 
-        TypeSpec adapter = createAdapter(elem);
+        TypeSpec adapter = createAdapter((TypeElement) elem);
 
         emit(parsingInfo.pkg, adapter);
     }
@@ -133,28 +134,22 @@ public class AdapterProcessor extends AbstractProcessor {
         }
     }
 
-    private TypeSpec createAdapter(Element elem) {
-        final String viewHolderName = "ViewHolderImpl";
-
+    private TypeSpec createAdapter(TypeElement elem) {
         TypeSpec.Builder adapter = TypeSpec.classBuilder(parsingInfo.adapterName)
                 .addModifiers(Modifier.PUBLIC);
 
-        createViewHolders(adapter, viewHolderName);
+        createViewHolders(adapter, parsingInfo.vhClassName.simpleName());
 
-        parsingInfo.vhClassName = ClassName.get(parsingInfo.pkg.getQualifiedName().toString(), parsingInfo.adapterName + "." + viewHolderName);
-
-        TypeElement superclass = (TypeElement) elem;
-        /* Extend adapter using ViewHolder's name */
-        adapter.superclass(ParameterizedTypeName.get(ClassName.get(superclass),
-                parsingInfo.vhClassName
-        ));
-
-        implementAdapter(adapter);
+        implementAdapter(adapter, elem);
 
         return adapter.build();
     }
 
-    private void implementAdapter(TypeSpec.Builder adapter) {
+    private void implementAdapter(TypeSpec.Builder adapter, TypeElement superclass) {
+        adapter.superclass(ParameterizedTypeName.get(
+                ClassName.get(superclass),
+                parsingInfo.vhClassName));
+
         implementDataLogic(adapter);
 
         MethodSpec.Builder onCreateViewHolder = onCreateViewHolderImpl(adapter);
@@ -568,6 +563,8 @@ public class AdapterProcessor extends AbstractProcessor {
     }
 
     private class ParsingInfo {
+        private final String baseVHName = "AdapterodactilViewHolder";
+
         private String adapterName;
         private PackageElement pkg;
         private Map<Integer, ViewTypeInfo> adapterInfo;
@@ -582,6 +579,7 @@ public class AdapterProcessor extends AbstractProcessor {
         private ParsingInfo(Element elem) {
             pkg = elementUtils.getPackageOf(elem);
             adapterName = elem.getSimpleName() + "Impl";
+            vhClassName = ClassName.get(pkg.getQualifiedName().toString(), adapterName).nestedClass(baseVHName);
             adapterInfo = new HashMap<>();
         }
     }
