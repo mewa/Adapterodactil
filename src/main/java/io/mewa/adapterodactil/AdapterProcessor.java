@@ -172,7 +172,12 @@ public class AdapterProcessor extends AbstractProcessor {
                 .addMethod(onBindViewHolder.build());
 
         for (ViewTypeInfo viewTypeInfo : parsingInfo.adapterInfo.values()) {
-            adapter.addField(TypeName.get(typeUtils.erasure(viewTypeInfo.viewTypeAdapter.asType())), viewTypeInfo.viewTypeAdapter.getSimpleName().toString());
+            TypeMirror erasure = typeUtils.erasure(viewTypeInfo.viewTypeAdapter.asType());
+            FieldSpec.Builder viewTypeAdapter = FieldSpec.builder(
+                    TypeName.get(erasure),
+                    viewTypeInfo.viewTypeAdapter.getSimpleName().toString())
+                    .initializer("new $T()", erasure);
+            adapter.addField(viewTypeAdapter.build());
         }
     }
 
@@ -265,22 +270,24 @@ public class AdapterProcessor extends AbstractProcessor {
                 for (int dataNum = 0; dataNum < info.row.dataId().length; dataNum++) {
                     int dataId = info.row.dataId()[dataNum];
 
+                    final String ijData = dataField(i, dataNum);
+
                     String iRowValue = "rowValue" + i + dataId;
                     onBindViewHolder.addCode("\n");
                     onBindViewHolder.addComment("$L $L, data $L, generated using $L", Row.class.getSimpleName(), i, dataNum, info.pluginInfo.plugin.getClass().getSimpleName());
-                    onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", info.fields.data, info.pluginInfo.plugin.getClass().getCanonicalName());
+                    onBindViewHolder.addJavadoc("$L generated using {@link $L}<br/>\n", ijData, info.pluginInfo.plugin.getClass().getCanonicalName());
 
                     if (ClassName.get(info.method.resultType) != TypeName.VOID) {
                         onBindViewHolder.addStatement("$T $L = $L.$L($L.$L, $L, $L)",
                                 info.method.resultType, iRowValue, viewTypeInfo.viewTypeAdapter.getSimpleName(),
-                                info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
+                                info.method.methodName, argViewHolder, ijData, dataId, varData);
                     } else {
                         onBindViewHolder.addStatement("$L.$L($L.$L, $L, $L)", viewTypeInfo.viewTypeAdapter.getSimpleName(),
-                                info.method.methodName, argViewHolder, info.fields.data, dataId, varData);
+                                info.method.methodName, argViewHolder, ijData, dataId, varData);
                     }
 
                     if (!info.pluginInfo.pluginName.equals(IgnorePlugin.class.getCanonicalName())) {
-                        CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, info.fields.data), iRowValue));
+                        CodeBlock statement = CodeBlock.of("$L", info.pluginInfo.plugin.process(i, String.format("%s.%s", argViewHolder, ijData), iRowValue));
                         onBindViewHolder.addCode(statement);
                     }
                 }
@@ -437,18 +444,19 @@ public class AdapterProcessor extends AbstractProcessor {
                 RowInfo info = viewTypeInfo.rows.get(i);
                 final String iView = "view" + i;
                 ctor.addParameter(VIEW, iView);
+                final String iLabel = "label" + i;
+                final String iData = dataField(i);
+
+                info.fields = new RowInfo.Fields(iLabel, iData);
 
                 for (int dataNum = 0; dataNum < info.row.dataId().length; dataNum++) {
                     int dataId = info.row.dataId()[dataNum];
 
-                    final String iLabel = "label" + i;
-                    final String iData = "data" + i + dataNum;
-
-                    info.fields = new RowInfo.Fields(iLabel, iData);
+                    final String ijData = dataField(i, dataNum);
 
                     TypeName paramType = TypeName.get(info.method.paramType);
 
-                    holder.addField(paramType, iData);
+                    holder.addField(paramType, ijData);
 
                     String labelValue = info.label != null ? info.label.value() : "*none*";
                     ctor.addComment(String.format(Locale.US, "%s %d, data %d, label: %s", Row.class.getSimpleName(), info.row.num(), dataNum, labelValue));
@@ -463,7 +471,7 @@ public class AdapterProcessor extends AbstractProcessor {
                                         .build()
                         );
                     }
-                    ctor.addStatement("$L = ($T) $L.findViewById($L)", iData, paramType, iView, dataId);
+                    ctor.addStatement("$L = ($T) $L.findViewById($L)", ijData, paramType, iView, dataId);
                 }
             }
             holder.addMethod(ctor.build());
@@ -555,6 +563,14 @@ public class AdapterProcessor extends AbstractProcessor {
         annotations.add(Row.class.getCanonicalName());
         annotations.add(Label.class.getCanonicalName());
         return annotations;
+    }
+
+    private String dataField(int row) {
+        return "data" + row;
+    }
+
+    private String dataField(int row, int num) {
+        return dataField(row) + "x" + num;
     }
 
     @Override
