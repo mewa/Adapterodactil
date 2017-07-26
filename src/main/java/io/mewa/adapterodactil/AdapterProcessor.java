@@ -119,6 +119,9 @@ public class AdapterProcessor extends AbstractProcessor {
                 parseItem((ExecutableElement) member);
         }
 
+        if (parsingInfo.dataInfo == null) {
+            parsingInfo.dataInfo = new DataInfo(null, null);
+        }
         TypeSpec adapter = createAdapter((TypeElement) elem);
 
         emit(parsingInfo.pkg, adapter);
@@ -195,20 +198,33 @@ public class AdapterProcessor extends AbstractProcessor {
 
         final String varElements = "elements";
 
-        VariableElement inputData = dataInfo.element.getParameters().get(0);
-        dataInfo.field = "stored_" + inputData.getSimpleName();
+        MethodSpec.Builder dataSetter;
+        TypeName typeName = ParameterizedTypeName.get(ClassName.get(List.class), ClassName.get(clazz));
+        String argElements;
+        if (dataInfo.element != null) {
+            VariableElement inputData = dataInfo.element.getParameters().get(0);
+            dataInfo.field = inputData.getSimpleName().toString();
+            dataSetter = MethodSpec.overriding(dataInfo.element);
+            argElements = inputData.getSimpleName().toString();
+        } else {
+            dataInfo.field = "data";
+            argElements = "data";
+            dataSetter = MethodSpec.methodBuilder("setData")
+                    .addModifiers(Modifier.PUBLIC)
+                    .addParameter(typeName, argElements);
+        }
 
-        FieldSpec.Builder storedData = FieldSpec.builder(ClassName.get(inputData.asType()), dataInfo.field, Modifier.PRIVATE)
+        FieldSpec.Builder storedData = FieldSpec.builder(typeName, dataInfo.field, Modifier.PRIVATE)
                 .initializer("new $T<>()", ArrayList.class);
 
         adapter.addField(storedData.build());
 
-        MethodSpec.Builder dataSetter = MethodSpec.overriding(dataInfo.element)
+        dataSetter
                 .addCode(
                         CodeBlock.builder()
                                 .addStatement("$T<$T> $L", List.class, clazz, varElements)
-                                .beginControlFlow("if ($L != null)", inputData)
-                                .addStatement("$L = new $T<>($L)", varElements, ArrayList.class, inputData)
+                                .beginControlFlow("if ($L != null)", argElements)
+                                .addStatement("$L = new $T<>($L)", varElements, ArrayList.class, argElements)
                                 .endControlFlow()
                                 .beginControlFlow("else")
                                 .addStatement("$L = $T.emptyList()", varElements, Collections.class)
@@ -217,16 +233,17 @@ public class AdapterProcessor extends AbstractProcessor {
                                 .build()
                 );
 
-        MethodSpec.Builder dataGetter = MethodSpec.methodBuilder("getStored_" + dataInfo.field)
+        String getterName = Character.toUpperCase(dataInfo.field.charAt(0)) + dataInfo.field.substring(1);
+        MethodSpec.Builder dataGetter = MethodSpec.methodBuilder("get" + getterName)
                 .addModifiers(Modifier.PROTECTED)
-                .returns(ClassName.get(inputData.asType()))
-                .addStatement("return $L", dataInfo.field);
+                .returns(typeName)
+                .addStatement("return this.$L", dataInfo.field);
 
         MethodSpec.Builder itemCount = MethodSpec.methodBuilder("getItemCount")
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(Override.class)
                 .returns(TypeName.INT)
-                .addStatement("return $L.size()", dataInfo.field);
+                .addStatement("return this.$L.size()", dataInfo.field);
 
         adapter.addMethod(dataSetter.build());
         adapter.addMethod(dataGetter.build());
@@ -262,7 +279,7 @@ public class AdapterProcessor extends AbstractProcessor {
                 clazz = e.getTypeMirror();
             }
 
-            onBindViewHolder.addStatement("$T $L = $L.get($L)", clazz, varData, parsingInfo.dataInfo.field, argPosition);
+            onBindViewHolder.addStatement("$T $L = this.$L.get($L)", clazz, varData, parsingInfo.dataInfo.field, argPosition);
 
             for (int i = 0; i < viewTypeInfo.rows.size(); ++i) {
                 RowInfo info = viewTypeInfo.rows.get(i);
